@@ -8,7 +8,8 @@ fi
 
 # Function to log messages
 log() {
-  echo "$(date +'%Y-%m-%d %H:%M:%S') - $1"
+  local timestamp=$(date +'%Y-%m-%d %H:%M:%S')
+  echo "$timestamp - $1"
 }
 
 # Function to handle errors and exit
@@ -22,26 +23,42 @@ handle_error() {
 trap 'handle_error' ERR
 
 # Update Pi-Hole
-log "Updating Pi-Hole..."
-sudo pihole -up
-log "Updating Pi-Hole Gravity..."
-pihole -g
+update_pihole() {
+  log "Updating Pi-Hole..."
+  sudo pihole -up
+  log "Updating Pi-Hole Gravity..."
+  pihole -g
+}
 
-# Do apt-get update and upgrade
-log "Getting update list..."
-sudo apt-get update --fix-missing
+# Update system packages
+update_packages() {
+  log "Getting update list..."
+  sudo apt-get update --fix-missing
 
-log "Upgrading packages..."
-sudo apt-get -y upgrade
+  log "Upgrading packages..."
+  sudo apt-get -y upgrade
 
-log "Removing unused packages..."
-sudo apt-get -y autoremove
+  log "Removing unused packages..."
+  sudo apt-get -y autoremove
 
-log "Cleaning up..."
-sudo apt-get -y autoclean
+  log "Cleaning up..."
+  sudo apt-get -y autoclean
+}
 
-# Reboot
-log "Rebooting..."
-sudo systemctl reboot -i
+# Reboot the system
+reboot_system() {
+  log "Rebooting..."
+  sudo systemctl reboot -i
+}
 
-log "Script execution completed successfully."
+# Main execution
+main() {
+  update_pihole
+  update_packages
+  reboot_system
+
+  log "Script execution completed successfully."
+}
+
+# Run the main function
+main
