@@ -61,4 +61,4 @@ main() {
 }
 
 # Run the main function
-main
+main >> logs.log 2>&1
