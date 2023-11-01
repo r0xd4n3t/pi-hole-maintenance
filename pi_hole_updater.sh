@@ -22,14 +22,6 @@ handle_error() {
 # Trap errors and exit
 trap 'handle_error' ERR
 
-# Update Pi-Hole
-update_pihole() {
-  log "Updating Pi-Hole..."
-  sudo pihole -up
-  log "Updating Pi-Hole Gravity..."
-  pihole -g
-}
-
 # Update system packages
 update_packages() {
   log "Updating system packages..."
@@ -37,6 +29,14 @@ update_packages() {
   sudo apt-get -y upgrade
   sudo apt-get -y autoremove
   sudo apt-get -y autoclean
+}
+
+# Update Pi-Hole
+update_pihole() {
+  log "Updating Pi-Hole..."
+  sudo pihole -up
+  log "Updating Pi-Hole Gravity..."
+  pihole -g
 }
 
 # Reboot the system
@@ -47,8 +47,8 @@ reboot_system() {
 
 # Main execution
 main() {
-  update_pihole
   update_packages
+  update_pihole
   reboot_system
   log "Script execution completed successfully."
 }
