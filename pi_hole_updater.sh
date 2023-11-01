@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Check if running with root privileges
+# Check for root privileges
 if [[ $(id -u) -ne 0 ]]; then
   echo "Please run this script as root (with sudo)." >&2
   exit 1
@@ -32,16 +32,10 @@ update_pihole() {
 
 # Update system packages
 update_packages() {
-  log "Getting update list..."
+  log "Updating system packages..."
   sudo apt-get update --fix-missing
-
-  log "Upgrading packages..."
   sudo apt-get -y upgrade
-
-  log "Removing unused packages..."
   sudo apt-get -y autoremove
-
-  log "Cleaning up..."
   sudo apt-get -y autoclean
 }
 
@@ -56,9 +50,8 @@ main() {
   update_pihole
   update_packages
   reboot_system
-
   log "Script execution completed successfully."
 }
 
-# Run the main function
+# Run the main function and log the output
 main >> logs.log 2>&1
