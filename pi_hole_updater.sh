@@ -31,12 +31,19 @@ update_packages() {
     apt-get -y autoclean
 }
 
-# Update Pi-Hole
+# Update Pi-Hole (using the full path)
 update_pihole() {
-    log "Updating Pi-Hole..."
-    pihole -up
-    log "Updating Pi-Hole Gravity..."
-    pihole -g
+    local pihole_cmd=$(which pihole)
+
+    if [[ -x "$pihole_cmd" ]]; then
+        log "Updating Pi-Hole..."
+        "$pihole_cmd" -up
+        log "Updating Pi-Hole Gravity..."
+        "$pihole_cmd" -g
+    else
+        log "Pi-Hole command not found or not executable."
+        exit 1
+    fi
 }
 
 # Reboot the system
@@ -55,4 +62,3 @@ main() {
 
 # Run the main function and log the output
 main >> logs.log 2>&1
-
