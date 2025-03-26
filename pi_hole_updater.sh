@@ -1,80 +1,130 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+# Configuration
+LOG_FILE="/root/logs.log"
+MAX_LOG_SIZE=$((1 * 1024 * 1024 * 1024))  # 1GB
+LOG_BACKUPS=3                              # Number of log backups to keep
+ENABLE_REBOOT="auto"                       # auto, always, never
+LOCK_FILE="/tmp/pi_hole_updater.lock"
+
+# Exit immediately on errors, unset variables, and pipeline failures
+set -euo pipefail
 
 # Check for root privileges
 if [[ $(id -u) -ne 0 ]]; then
-    echo "Please run this script as root (with sudo)." >&2
+    echo "ERROR: This script must be run as root" >&2
     exit 1
 fi
+
+# Create lock file or exit if already running
+if ! (set -C; echo $$ > "$LOCK_FILE") 2>/dev/null; then
+    echo "ERROR: Script already running (PID $(<"$LOCK_FILE"))" >&2
+    exit 1
+fi
+trap 'rm -f "$LOCK_FILE"; exit' EXIT
 
 # Function to log messages
 log() {
     local timestamp=$(date +'%Y-%m-%d %H:%M:%S')
-    echo "$timestamp - $1"
+    echo "$timestamp - $1" >> "$LOG_FILE"
 }
 
-# Function to handle errors and exit
+# Error handling with line number
 handle_error() {
-    local exit_code="$?"
-    log "Error occurred with exit code $exit_code."
+    local exit_code=$?
+    local line_no=$1
+    log "ERROR: Command failed at line $line_no with exit code $exit_code"
     exit "$exit_code"
 }
+trap 'handle_error $LINENO' ERR
 
-# Trap errors and exit
-trap 'handle_error' ERR
-
-# Function to reset logs.log if size is or exceeds 1GB
-reset_logfile() {
-    local logfile="logs.log"
-    local max_size=$((1024 * 1024 * 1024)) # 1GB in bytes
-
-    if [[ -f "$logfile" ]]; then
-        local filesize=$(stat -c%s "$logfile")
-        if [[ "$filesize" -ge "$max_size" ]]; then
-            log "Resetting $logfile as it exceeds 1GB in size."
-            > "$logfile" # Truncate the log file
+# Rotate logs if needed
+rotate_logs() {
+    if [[ -f "$LOG_FILE" ]]; then
+        local filesize=$(stat -c%s "$LOG_FILE")
+        if (( filesize >= MAX_LOG_SIZE )); then
+            log "Rotating log file (size: $filesize bytes)"
+            for ((i=LOG_BACKUPS; i>0; i--)); do
+                local src="${LOG_FILE}.$((i-1))"
+                local dst="${LOG_FILE}.$i"
+                [[ -f "$src" ]] && mv -f "$src" "$dst"
+            done
+            mv -f "$LOG_FILE" "${LOG_FILE}.0"
         fi
+    fi
+}
+
+# Fix corrupted APT lists
+fix_apt_lists() {
+    log "Checking for corrupted APT lists..."
+    if grep -q "Encountered a section with no Package" /var/log/apt/*; then
+        log "Corrupted APT lists detected. Cleaning..."
+        rm -rf /var/lib/apt/lists/*
+        apt-get clean
     fi
 }
 
 # Update system packages
 update_packages() {
-    log "Updating system packages..."
-    apt-get update --fix-missing || { log "Failed to update package lists."; exit 1; }
-    apt-get -y upgrade || { log "Failed to upgrade packages."; exit 1; }
-    apt-get -y autoremove || { log "Failed to remove unused packages."; exit 1; }
-    apt-get -y autoclean || { log "Failed to clean package cache."; exit 1; }
+    log "Starting system update..."
+    fix_apt_lists
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq --fix-missing
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq
+    DEBIAN_FRONTEND=noninteractive apt-get autoremove -y -qq
+    DEBIAN_FRONTEND=noninteractive apt-get autoclean -qq
+    log "System update completed successfully"
 }
 
-# Update Pi-Hole (using the full path)
+# Update Pi-Hole components
 update_pihole() {
-    local pihole_cmd=$(which pihole 2>/dev/null)
+    local pihole_cmd=$(command -v pihole)
 
     if [[ -x "$pihole_cmd" ]]; then
-        log "Updating Pi-Hole..."
-        "$pihole_cmd" -up || { log "Failed to update Pi-Hole."; exit 1; }
-        log "Updating Pi-Hole Gravity..."
-        "$pihole_cmd" -g || { log "Failed to update Pi-Hole Gravity."; exit 1; }
+        log "Starting Pi-Hole update..."
+        "$pihole_cmd" -up -y || { log "Pi-Hole update failed"; return 1; }
+        log "Updating Gravity database..."
+        "$pihole_cmd" -g -y || { log "Gravity update failed"; return 1; }
+        log "Pi-Hole updates completed successfully"
     else
-        log "Pi-Hole command not found or not executable."
-        exit 1
+        log "ERROR: Pi-Hole not found or not executable"
+        return 1
     fi
 }
 
-# Reboot the system
-reboot_system() {
-    log "Rebooting..."
-    systemctl reboot -i || { log "Failed to reboot the system."; exit 1; }
+# Check if reboot is required
+check_reboot() {
+    case $ENABLE_REBOOT in
+        "always")
+            log "Reboot requested by configuration"
+            return 0
+            ;;
+        "auto")
+            if [[ -f "/var/run/reboot-required" ]]; then
+                log "Reboot required detected"
+                return 0
+            fi
+            ;;
+    esac
+    log "No reboot required"
+    return 1
 }
 
-# Main execution
+# Main execution flow
 main() {
-    log "Starting script execution..."
-    reset_logfile # Check and reset logs.log if necessary
+    rotate_logs
+    log "=== Starting Pi-Hole maintenance ==="
+
     update_packages
     update_pihole
-    log "Script execution completed successfully."
-    reboot_system
+
+    if check_reboot; then
+        log "Initiating system reboot..."
+        sync
+        systemctl reboot
+    fi
+
+    log "=== Maintenance completed successfully ==="
 }
 
-# Run the main function and log the output
-main >> logs.log 2>&1
+# Start main process and handle logging
+main
